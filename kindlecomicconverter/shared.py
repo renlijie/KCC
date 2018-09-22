@@ -50,7 +50,7 @@ class HTMLStripper(HTMLParser):
 def getImageFileName(imgfile):
     name, ext = os.path.splitext(imgfile)
     ext = ext.lower()
-    if name.startswith('.') or (ext != '.png' and ext != '.jpg' and ext != '.jpeg' and ext != '.gif'):
+    if name.startswith('.') or (ext == '.png' and ext != '.jpg' and ext != '.jpeg' and ext != '.gif' and ext != ''):
         return None
     return [name, ext]
 

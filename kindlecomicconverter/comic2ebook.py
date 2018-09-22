@@ -501,7 +501,7 @@ def buildEPUB(path, chapternames, tomenumber):
     buildOPF(path, options.title, filelist, cover)
 
 
-def imgDirectoryProcessing(path):
+def imgDirectoryProcessing(tmppath):
     global workerPool, workerOutput
     workerPool = Pool(maxtasksperchild=100)
     workerOutput = []
@@ -509,28 +509,23 @@ def imgDirectoryProcessing(path):
     options.imgOld = []
     work = []
     pagenumber = 0
-    for dirpath, _, filenames in os.walk(path):
+    for dirpath, _, filenames in os.walk(tmppath):
         for afile in filenames:
             pagenumber += 1
             work.append([afile, dirpath, options])
-    if GUI:
-        GUI.progressBarTick.emit(str(pagenumber))
     if len(work) > 0:
         for i in work:
             workerPool.apply_async(func=imgFileProcessing, args=(i, ), callback=imgFileProcessingTick)
         workerPool.close()
         workerPool.join()
-        if GUI and not GUI.conversionAlive:
-            rmtree(os.path.join(path, '..', '..'), True)
-            raise UserWarning("Conversion interrupted.")
         if len(workerOutput) > 0:
-            rmtree(os.path.join(path, '..', '..'), True)
+            rmtree(os.path.join(tmppath, '..', '..'), True)
             raise RuntimeError("One of workers crashed. Cause: " + workerOutput[0][0], workerOutput[0][1])
         for file in options.imgOld:
             if os.path.isfile(file):
                 os.remove(file)
     else:
-        rmtree(os.path.join(path, '..', '..'), True)
+        rmtree(os.path.join(tmppath, '..', '..'), True)
         raise UserWarning("Source directory is empty.")
 
 
@@ -543,10 +538,6 @@ def imgFileProcessingTick(output):
             if page is not None:
                 options.imgMetadata[page[0]] = page[1]
                 options.imgOld.append(page[2])
-    if GUI:
-        GUI.progressBarTick.emit('tick')
-        if not GUI.conversionAlive:
-            workerPool.terminate()
 
 
 def imgFileProcessing(work):
@@ -564,8 +555,6 @@ def imgFileProcessing(work):
                 img.cropMargin(opt.croppingp)
             img.autocontrastImage()
             img.resizeImage()
-            if opt.forcepng and not opt.forcecolor:
-                img.quantizeImage()
             output.append(img.saveToDir())
         return output
     except Exception:
@@ -649,8 +638,8 @@ def getOutputFilename(srcpath, wantedname, ext, tomenumber):
     return filename
 
 
-def getComicInfo(path, originalpath):
-    xmlPath = os.path.join(path, 'ComicInfo.xml')
+def getComicInfo(tmppath, originalpath):
+    xmlPath = os.path.join(tmppath, 'ComicInfo.xml')
     options.authors = ['KCC']
     options.remoteCovers = {}
     options.chapters = []
@@ -790,7 +779,7 @@ def splitDirectory(path):
     level = -1
     for root, _, files in os.walk(os.path.join(path, 'OEBPS', 'Images')):
         for f in files:
-            if f.endswith('.jpg') or f.endswith('.jpeg') or f.endswith('.png') or f.endswith('.gif'):
+            if not f.endswith('.cbz'):
                 newLevel = os.path.join(root, f).replace(os.path.join(path, 'OEBPS', 'Images'), '').count(os.sep)
                 if level != -1 and level != newLevel:
                     level = 0
@@ -845,7 +834,7 @@ def splitProcess(path, mode):
     return output
 
 
-def detectCorruption(tmppath, orgpath):
+def detectCorruption(tmppath, orgpath, verify=False):
     imageNumber = 0
     imageSmaller = 0
     alreadyProcessed = False
@@ -859,35 +848,28 @@ def detectCorruption(tmppath, orgpath):
                 if os.path.getsize(path) == 0:
                     rmtree(os.path.join(tmppath, '..', '..'), True)
                     raise RuntimeError('Image file %s is corrupted.' % pathOrg)
-                try:
-                    img = Image.open(path)
-                    img.verify()
-                    img = Image.open(path)
-                    img.load()
-                    imageNumber += 1
-                    if options.profileData[1][0] > img.size[0] and options.profileData[1][1] > img.size[1]:
-                        imageSmaller += 1
-                except Exception as err:
-                    rmtree(os.path.join(tmppath, '..', '..'), True)
-                    if 'decoder' in str(err) and 'not available' in str(err):
-                        raise RuntimeError('Pillow was compiled without JPG and/or PNG decoder.')
-                    else:
-                        raise RuntimeError('Image file %s is corrupted.' % pathOrg)
+                if (verify):
+                    try:
+                        img = Image.open(path)
+                        img.verify()
+                        img = Image.open(path)
+                        img.load()
+                        imageNumber += 1
+                        if options.profileData[1][0] > img.size[0] and options.profileData[1][1] > img.size[1]:
+                            imageSmaller += 1
+                    except Exception as err:
+                        rmtree(os.path.join(tmppath, '..', '..'), True)
+                        if 'decoder' in str(err) and 'not available' in str(err):
+                            raise RuntimeError('Pillow was compiled without JPG and/or PNG decoder.')
+                        else:
+                            raise RuntimeError('Image file %s is corrupted.' % pathOrg)
             else:
                 os.remove(os.path.join(root, name))
     if alreadyProcessed:
         print("WARNING: Source files are probably created by KCC. The second conversion will decrease quality.")
-        if GUI:
-            GUI.addMessage.emit('Source files are probably created by KCC. The second conversion will decrease quality.'
-                                , 'warning', False)
-            GUI.addMessage.emit('', '', False)
     if imageSmaller > imageNumber * 0.25 and not options.upscale and not options.stretch:
         print("WARNING: More than 25% of images are smaller than target device resolution. "
               "Consider enabling stretching or upscaling to improve readability.")
-        if GUI:
-            GUI.addMessage.emit('More than 25% of images are smaller than target device resolution.', 'warning', False)
-            GUI.addMessage.emit('Consider enabling stretching or upscaling to improve readability.', 'warning', False)
-            GUI.addMessage.emit('', '', False)
 
 
 def createNewTome():
@@ -1091,46 +1073,24 @@ def checkPre(source):
 
 
 def makeBook(source, qtgui=None):
-    global GUI
-    GUI = qtgui
-    if GUI:
-        GUI.progressBarTick.emit('1')
-    else:
-        checkTools(source)
-    checkPre(source)
+    #checkTools(source)
+    #checkPre(source)
     print("Preparing source images...")
     path = getWorkFolder(source)
     print("Checking images...")
-    getComicInfo(os.path.join(path, "OEBPS", "Images"), source)
-    detectCorruption(os.path.join(path, "OEBPS", "Images"), source)
-    if options.webtoon:
-        if image.ProfileData.Profiles[options.profile][1][1] > 1024:
-            y = 1024
-        else:
-            y = image.ProfileData.Profiles[options.profile][1][1]
-        comic2panel.main(['-y ' + str(y), '-i', '-m', path], qtgui)
+    tmppath = os.path.join(path, "OEBPS", "Images")
+    #getComicInfo(tmppath, source)
+    detectCorruption(tmppath, source)
     print("Processing images...")
-    if GUI:
-        GUI.progressBarTick.emit('Processing images')
-    imgDirectoryProcessing(os.path.join(path, "OEBPS", "Images"))
-    if GUI:
-        GUI.progressBarTick.emit('1')
-    chapterNames = sanitizeTree(os.path.join(path, 'OEBPS', 'Images'))
-    if 'Ko' in options.profile and options.format == 'CBZ':
-        sanitizeTreeKobo(os.path.join(path, 'OEBPS', 'Images'))
+    imgDirectoryProcessing(tmppath)
+    chapterNames = sanitizeTree(tmppath)
+    sanitizeTreeKobo(tmppath)
     if options.batchsplit > 0:
         tomes = splitDirectory(path)
     else:
         tomes = [path]
     filepath = []
     tomeNumber = 0
-    if GUI:
-        if options.format == 'CBZ':
-            GUI.progressBarTick.emit('Compressing CBZ files')
-        else:
-            GUI.progressBarTick.emit('Compressing EPUB files')
-        GUI.progressBarTick.emit(str(len(tomes) + 1))
-        GUI.progressBarTick.emit('tick')
     options.baseTitle = options.title
     options.covers = []
     for tome in tomes:
@@ -1148,113 +1108,9 @@ def makeBook(source, qtgui=None):
             else:
                 filepath.append(getOutputFilename(source, options.output, '.cbz', ''))
             makeZIP(tome + '_comic', os.path.join(tome, "OEBPS", "Images"))
-        else:
-            print("Creating EPUB file...")
-            buildEPUB(tome, chapterNames, tomeNumber)
-            if len(tomes) > 1:
-                filepath.append(getOutputFilename(source, options.output, '.epub', ' ' + str(tomeNumber)))
-            else:
-                filepath.append(getOutputFilename(source, options.output, '.epub', ''))
-            makeZIP(tome + '_comic', tome, True)
         move(tome + '_comic.zip', filepath[-1])
         rmtree(tome, True)
-        if GUI:
-            GUI.progressBarTick.emit('tick')
-    if not GUI and options.format == 'MOBI':
-        print("Creating MOBI files...")
-        work = []
-        for i in filepath:
-            work.append([i])
-        output = makeMOBI(work, GUI)
-        for errors in output:
-            if errors[0] != 0:
-                print('Error: KindleGen failed to create MOBI!')
-                print(errors)
-                return filepath
-        k = kindle.Kindle()
-        if k.path and k.coverSupport:
-            print("Kindle detected. Uploading covers...")
-        for i in filepath:
-            output = makeMOBIFix(i, options.covers[filepath.index(i)][1])
-            if not output[0]:
-                print('Error: Failed to tweak KindleGen output!')
-                return filepath
-            else:
-                os.remove(i.replace('.epub', '.mobi') + '_toclean')
-            if k.path and k.coverSupport:
-                options.covers[filepath.index(i)][0].saveToKindle(k, options.covers[filepath.index(i)][1])
+    print("Done. Making sure there is no corruption...")
+    detectCorruption(tmppath, source, True)
     return filepath
 
-
-def makeMOBIFix(item, uuid):
-    os.remove(item)
-    mobiPath = item.replace('.epub', '.mobi')
-    move(mobiPath, mobiPath + '_toclean')
-    try:
-        dualmetafix.DualMobiMetaFix(mobiPath + '_toclean', mobiPath, bytes(uuid, 'UTF-8'))
-        return [True]
-    except Exception as err:
-        return [False, format(err)]
-
-
-def makeMOBIWorkerTick(output):
-    makeMOBIWorkerOutput.append(output)
-    if output[0] != 0:
-        makeMOBIWorkerPool.terminate()
-    if GUI:
-        GUI.progressBarTick.emit('tick')
-        if not GUI.conversionAlive:
-            makeMOBIWorkerPool.terminate()
-
-
-def makeMOBIWorker(item):
-    item = item[0]
-    kindlegenErrorCode = 0
-    kindlegenError = ''
-    try:
-        if os.path.getsize(item) < 629145600:
-            output = Popen('kindlegen -dont_append_source -locale en "' + item + '"',
-                           stdout=PIPE, stderr=STDOUT, stdin=PIPE, shell=True)
-            for line in output.stdout:
-                line = line.decode('utf-8')
-                # ERROR: Generic error
-                if "Error(" in line:
-                    kindlegenErrorCode = 1
-                    kindlegenError = line
-                # ERROR: EPUB too big
-                if ":E23026:" in line:
-                    kindlegenErrorCode = 23026
-                if kindlegenErrorCode > 0:
-                    break
-                if ":I1036: Mobi file built successfully" in line:
-                    output.terminate()
-        else:
-            # ERROR: EPUB too big
-            kindlegenErrorCode = 23026
-        return [kindlegenErrorCode, kindlegenError, item]
-    except Exception as err:
-        # ERROR: KCC unknown generic error
-        kindlegenErrorCode = 1
-        kindlegenError = format(err)
-        return [kindlegenErrorCode, kindlegenError, item]
-
-
-def makeMOBI(work, qtgui=None):
-    global GUI, makeMOBIWorkerPool, makeMOBIWorkerOutput
-    GUI = qtgui
-    makeMOBIWorkerOutput = []
-    availableMemory = virtual_memory().total / 1000000000
-    if availableMemory <= 2:
-        threadNumber = 1
-    elif 2 < availableMemory <= 4:
-        threadNumber = 2
-    elif 4 < availableMemory <= 8:
-        threadNumber = 4
-    else:
-        threadNumber = None
-    makeMOBIWorkerPool = Pool(threadNumber, maxtasksperchild=10)
-    for i in work:
-        makeMOBIWorkerPool.apply_async(func=makeMOBIWorker, args=(i, ), callback=makeMOBIWorkerTick)
-    makeMOBIWorkerPool.close()
-    makeMOBIWorkerPool.join()
-    return makeMOBIWorkerOutput
