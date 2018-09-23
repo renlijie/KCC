@@ -619,7 +619,7 @@ def getOutputFilename(srcpath, wantedname, ext, tomenumber):
             filename = os.path.join(os.path.abspath(options.output),
                                     os.path.basename(os.path.splitext(srcpath)[0]) + ext)
     elif os.path.isdir(srcpath):
-        filename = srcpath + tomenumber + ext
+        filename = options.title + tomenumber + ext
     else:
         if 'Ko' in options.profile and options.format == 'EPUB':
             path = srcpath.split(os.path.sep)
