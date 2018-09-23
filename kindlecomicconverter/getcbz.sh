@@ -9,15 +9,7 @@ else
 fi
 echo
 
-append_suffix=1
 split=1
-
-read -p "Add jpg suffix? (Y/n) " yn
-case $yn in
-    [Yy]* ) append_suffix=1;;
-    [Nn]* ) append_suffix=0;;
-    * ) append_suffix=1;;
-esac
 
 read -p "Split? (Y/n) " yn
 case $yn in
@@ -25,12 +17,6 @@ case $yn in
     [Nn]* ) split=0;;
     * ) split=1;;
 esac
-
-if [ $append_suffix -eq 1 ];
-then
-    echo "Appending jpg suffix..."
-    time find . -type f -exec mv '{}' '{}'.jpg \;;
-fi
 
 if [ $split -eq 1 ];
 then
