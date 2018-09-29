@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [[ $PWD = /home/lijie/SharedFolder* ]]; then
+if [[ $PWD = /home/lijie/manga* ]]; then
     echo Current dir OK: $PWD
 else
     echo Current dir BAD: $PWD
